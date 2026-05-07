@@ -48,6 +48,7 @@ private:
 	PostgresTransactionState transaction_state;
 	AccessMode access_mode;
 	PostgresIsolationLevel isolation_level;
+	string default_role;
 	string temporary_schema;
 	reference_map_t<CatalogEntry, shared_ptr<CatalogEntry>> referenced_entries;
 

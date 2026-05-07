@@ -412,6 +412,7 @@ bool PostgresGlobalState::TryOpenNewConnection(ClientContext &context, PostgresL
 	{
 		lock_guard<mutex> parallel_lock(lock);
 		if (!used_main_thread) {
+			bool needs_scan_setup = false;
 			if (bind_data.can_use_main_thread) {
 				lstate.connection = PostgresConnection(GetConnection().GetConnection());
 			} else {
@@ -422,8 +423,13 @@ bool PostgresGlobalState::TryOpenNewConnection(ClientContext &context, PostgresL
 					lstate.pool_connection = pg_catalog->GetConnectionPool().ForceGetConnection();
 				}
 				lstate.connection = PostgresConnection(lstate.pool_connection.GetConnection().GetConnection());
+				needs_scan_setup = pg_catalog != nullptr;
 			}
 			used_main_thread = true;
+			if (needs_scan_setup) {
+				PostgresScanConnect(context, lstate.connection, snapshot, pg_catalog->access_mode,
+				                    pg_catalog->isolation_level, pg_catalog->default_role);
+			}
 			return true;
 		}
 	}

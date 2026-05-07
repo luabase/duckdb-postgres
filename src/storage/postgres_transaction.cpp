@@ -11,7 +11,7 @@ namespace duckdb {
 PostgresTransaction::PostgresTransaction(PostgresCatalog &postgres_catalog, TransactionManager &manager,
                                          ClientContext &context)
     : Transaction(manager, context), access_mode(postgres_catalog.access_mode),
-      isolation_level(postgres_catalog.isolation_level) {
+      isolation_level(postgres_catalog.isolation_level), default_role(postgres_catalog.default_role) {
 	auto oauth_token_holder = SetThreadLocalOAuthTokenFromSessionOption(context);
 	connection = postgres_catalog.GetConnectionPool().GetConnection();
 }
@@ -39,7 +39,11 @@ void PostgresTransaction::Rollback() {
 }
 
 string PostgresTransaction::GetBeginTransactionQuery() {
-	return GetBeginTransactionQuery(isolation_level, access_mode);
+	string result = GetBeginTransactionQuery(isolation_level, access_mode);
+	if (!default_role.empty()) {
+		result += "; SET LOCAL ROLE \"" + default_role + "\"";
+	}
+	return result;
 }
 
 string PostgresTransaction::GetBeginTransactionQuery(PostgresIsolationLevel isolation_level, AccessMode access_mode) {
