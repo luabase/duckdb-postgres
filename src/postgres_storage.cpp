@@ -19,6 +19,7 @@ static unique_ptr<Catalog> PostgresAttach(optional_ptr<StorageExtensionInfo> sto
 
 	string secret_name;
 	string schema_to_load;
+	string default_role;
 	PostgresIsolationLevel isolation_level = PostgresIsolationLevel::REPEATABLE_READ;
 	string secret_storage_table_name;
 	bool secret_storage_table_specified_explicitly = false;
@@ -45,6 +46,11 @@ static unique_ptr<Catalog> PostgresAttach(optional_ptr<StorageExtensionInfo> sto
 		} else if (lower_name == "secret_storage_table") {
 			secret_storage_table_name = entry.second.ToString();
 			secret_storage_table_specified_explicitly = true;
+		} else if (lower_name == "default_role") {
+			default_role = entry.second.ToString();
+			if (default_role.find('"') != string::npos || default_role.find('\0') != string::npos) {
+				throw BinderException("DEFAULT_ROLE must not contain double quote or NUL characters: %s", default_role);
+			}
 		} else {
 			throw BinderException("Unrecognized option for Postgres attach: %s", entry.first);
 		}
@@ -53,7 +59,7 @@ static unique_ptr<Catalog> PostgresAttach(optional_ptr<StorageExtensionInfo> sto
 	                                        secret_storage_table_specified_explicitly);
 	return make_uniq<PostgresCatalog>(context, db, std::move(attach_path), attach_options.access_mode,
 	                                  std::move(schema_to_load), isolation_level, secret_name,
-	                                  std::move(secret_storage_table));
+	                                  std::move(secret_storage_table), std::move(default_role));
 }
 
 static unique_ptr<TransactionManager> PostgresCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

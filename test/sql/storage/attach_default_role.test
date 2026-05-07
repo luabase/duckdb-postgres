@@ -1,0 +1,104 @@
+# name: test/sql/storage/attach_default_role.test
+# description: DEFAULT_ROLE ATTACH option applies SET LOCAL ROLE on every parallel-scan worker connection.
+# group: [storage]
+
+require postgres_scanner
+
+require-env POSTGRES_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'dbname=postgresscanner' AS s_admin (TYPE POSTGRES);
+
+statement ok
+CALL postgres_execute('s_admin', 'DROP ROLE IF EXISTS attach_default_role_owner');
+
+statement ok
+CALL postgres_execute('s_admin', 'CREATE ROLE attach_default_role_owner NOLOGIN');
+
+statement ok
+CALL postgres_execute('s_admin', 'GRANT attach_default_role_owner TO CURRENT_USER');
+
+statement ok
+CALL postgres_execute('s_admin', 'DROP TABLE IF EXISTS attach_default_role_data');
+
+statement ok
+CALL postgres_execute('s_admin', 'CREATE TABLE attach_default_role_data AS SELECT i FROM generate_series(1, 1000000) t(i)');
+
+statement ok
+CALL postgres_execute('s_admin', 'ALTER TABLE attach_default_role_data OWNER TO attach_default_role_owner');
+
+statement ok
+CALL postgres_execute('s_admin', 'REVOKE ALL ON attach_default_role_data FROM PUBLIC');
+
+statement ok
+CALL postgres_execute('s_admin', 'ANALYZE attach_default_role_data');
+
+statement ok
+DETACH s_admin;
+
+statement ok
+ATTACH 'dbname=postgresscanner' AS s_no_role (TYPE POSTGRES, READ_ONLY);
+
+statement ok
+SET threads=10;
+
+statement ok
+SET pg_pages_per_task=1;
+
+statement ok
+SET pg_connection_limit=4;
+
+statement error
+SELECT COUNT(*) FROM s_no_role.attach_default_role_data
+----
+permission denied
+
+statement ok
+DETACH s_no_role;
+
+statement ok
+ATTACH 'dbname=postgresscanner' AS s_with_role (TYPE POSTGRES, READ_ONLY, DEFAULT_ROLE 'attach_default_role_owner');
+
+statement ok
+SET threads=10;
+
+statement ok
+SET pg_pages_per_task=1;
+
+statement ok
+SET pg_connection_limit=4;
+
+statement ok
+CALL enable_logging('PostgresQueryLog');
+
+query I
+SELECT COUNT(*) FROM s_with_role.attach_default_role_data
+----
+1000000
+
+query I
+SELECT COUNT(*) > 1
+FROM duckdb_logs_parsed('PostgresQueryLog')
+WHERE query = 'SET LOCAL ROLE "attach_default_role_owner"'
+----
+1
+
+statement ok
+DETACH s_with_role;
+
+statement error
+ATTACH 'dbname=postgresscanner' AS s_bad (TYPE POSTGRES, DEFAULT_ROLE 'attach"_role')
+----
+DEFAULT_ROLE must not contain double quote
+
+statement ok
+ATTACH 'dbname=postgresscanner' AS s_cleanup (TYPE POSTGRES);
+
+statement ok
+CALL postgres_execute('s_cleanup', 'DROP TABLE IF EXISTS attach_default_role_data');
+
+statement ok
+CALL postgres_execute('s_cleanup', 'DROP ROLE IF EXISTS attach_default_role_owner');
+
+statement ok
+DETACH s_cleanup;

@@ -314,11 +314,15 @@ static unique_ptr<LocalTableFunctionState> GetLocalState(ClientContext &context,
                                                          PostgresGlobalState &gstate);
 
 static void PostgresScanConnect(ClientContext &context, PostgresConnection &conn, const string &snapshot,
-                                AccessMode access_mode, PostgresIsolationLevel isolation_level) {
+                                AccessMode access_mode, PostgresIsolationLevel isolation_level,
+                                const string &default_role) {
 	conn.Execute(context, PostgresTransaction::GetBeginTransactionQuery(isolation_level, access_mode));
 	if (!snapshot.empty()) {
 		D_ASSERT(isolation_level != PostgresIsolationLevel::READ_COMMITTED);
 		conn.Query(context, StringUtil::Format("SET TRANSACTION SNAPSHOT '%s'", snapshot));
+	}
+	if (!default_role.empty()) {
+		conn.Execute(context, StringUtil::Format("SET LOCAL ROLE \"%s\"", default_role));
 	}
 	Value statement_timeout;
 	if (context.TryGetCurrentSetting("pg_statement_timeout_millis", statement_timeout) && !statement_timeout.IsNull()) {
@@ -344,7 +348,8 @@ static unique_ptr<GlobalTableFunctionState> PostgresInitGlobalState(ClientContex
 	} else {
 		auto con = PostgresConnection::Open(bind_data.dsn, bind_data.attach_path);
 		if (bind_data.use_transaction) {
-			PostgresScanConnect(context, con, string(), AccessMode::READ_ONLY, PostgresIsolationLevel::REPEATABLE_READ);
+			PostgresScanConnect(context, con, string(), AccessMode::READ_ONLY, PostgresIsolationLevel::REPEATABLE_READ,
+			                    string());
 		}
 		result->SetConnection(std::move(con));
 	}
@@ -431,11 +436,12 @@ bool PostgresGlobalState::TryOpenNewConnection(ClientContext &context, PostgresL
 			}
 		}
 		lstate.connection = PostgresConnection(lstate.pool_connection.GetConnection().GetConnection());
-		PostgresScanConnect(context, lstate.connection, snapshot, pg_catalog->access_mode, pg_catalog->isolation_level);
+		PostgresScanConnect(context, lstate.connection, snapshot, pg_catalog->access_mode, pg_catalog->isolation_level,
+		                    pg_catalog->default_role);
 	} else {
 		lstate.connection = PostgresConnection::Open(bind_data.dsn, bind_data.attach_path);
 		PostgresScanConnect(context, lstate.connection, snapshot, AccessMode::READ_ONLY,
-		                    PostgresIsolationLevel::REPEATABLE_READ);
+		                    PostgresIsolationLevel::REPEATABLE_READ, string());
 	}
 	return true;
 }

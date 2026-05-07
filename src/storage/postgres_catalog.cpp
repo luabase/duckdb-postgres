@@ -30,10 +30,12 @@ unique_ptr<SecretEntry> GetSecret(ClientContext &context, const string &secret_n
 
 PostgresCatalog::PostgresCatalog(ClientContext &ctx, AttachedDatabase &db_p, string attach_path_p,
                                  AccessMode access_mode, string schema_to_load, PostgresIsolationLevel isolation_level,
-                                 const string &secret_name, SecretStorageTable secret_storage_table_p)
+                                 const string &secret_name, SecretStorageTable secret_storage_table_p,
+                                 string default_role_p)
     : Catalog(db_p), attach_path(std::move(attach_path_p)), access_mode(access_mode), isolation_level(isolation_level),
-      schemas(*this, schema_to_load), connection_pool(make_shared_ptr<PostgresConnectionPool>(*this, ctx)),
-      default_schema(schema_to_load), secret_storage_table(std::move(secret_storage_table_p)) {
+      default_role(std::move(default_role_p)), schemas(*this, schema_to_load),
+      connection_pool(make_shared_ptr<PostgresConnectionPool>(*this, ctx)), default_schema(schema_to_load),
+      secret_storage_table(std::move(secret_storage_table_p)) {
 	auto secret_entry = GetSecretEntry(ctx, secret_name);
 	this->rds_token_config = PostgresAws::ExtractTokenConfigFromSecret(secret_entry);
 	if (!rds_token_config.Enabled()) {
