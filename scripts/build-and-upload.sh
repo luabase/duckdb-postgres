@@ -18,7 +18,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DUCKDB_VERSION="v1.5.2"
 GCS_BUCKET="def-duckdb-extensions"
 EXTENSION_NAME="postgres_scanner"
-DOCKER_IMAGE="ubuntu:22.04"
+DOCKER_IMAGE_AMD64="quay.io/pypa/manylinux_2_28_x86_64"
+DOCKER_IMAGE_ARM64="quay.io/pypa/manylinux_2_28_aarch64"
 
 # vcpkg commit pinned in the project Makefile (tag 2025.12.12)
 VCPKG_PIN="84bab45d415d22042bd0b9081aea57f362da3f35"
@@ -213,14 +214,14 @@ build_native() {
 build_docker() {
     local target_platform="$1"
 
-    local docker_platform
+    local docker_platform docker_image
     case "$target_platform" in
-        linux_amd64) docker_platform="linux/amd64" ;;
-        linux_arm64) docker_platform="linux/arm64" ;;
+        linux_amd64) docker_platform="linux/amd64"; docker_image="$DOCKER_IMAGE_AMD64" ;;
+        linux_arm64) docker_platform="linux/arm64"; docker_image="$DOCKER_IMAGE_ARM64" ;;
         *) err "Docker builds only support linux targets, got: $target_platform"; return 1 ;;
     esac
 
-    log "Building $target_platform (Docker $docker_platform)..."
+    log "Building $target_platform (Docker $docker_platform on $docker_image)..."
 
     if ! command -v docker &>/dev/null; then
         err "Docker is required for $target_platform builds. Install Docker Desktop."
@@ -238,12 +239,20 @@ build_docker() {
         -w /workspace \
         -e VCPKG_PIN="${VCPKG_PIN}" \
         -e DOCKER_MAKE_JOBS="${docker_make_jobs}" \
-        "$DOCKER_IMAGE" \
+        "$docker_image" \
         bash -c "
             set -e
-            echo \"=== Installing build dependencies ===\"
-            apt-get update -qq
-            apt-get install -y -qq build-essential cmake git curl zip unzip tar pkg-config ninja-build python3 > /dev/null 2>&1
+            echo \"=== Installing libpq/openssl build prerequisites ===\"
+            # bison + flex are required by the project's overlay libpq port
+            # (vcpkg_ports/libpq); ninja-build / perl-IPC-Cmd / perl-core are
+            # required by openssl + the libpq build itself.
+            yum install -y -q ninja-build perl-IPC-Cmd perl-core bison flex \
+                zip unzip tar pkgconfig curl > /dev/null
+
+            echo \"=== Verifying toolchain ===\"
+            cmake --version | head -1
+            ninja --version
+            perl -e 'use IPC::Cmd; print \"perl IPC::Cmd OK\\n\"'
 
             echo \"=== Setting up vcpkg (commit \$VCPKG_PIN) ===\"
             rm -rf /opt/vcpkg
