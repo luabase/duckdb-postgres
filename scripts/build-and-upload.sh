@@ -233,21 +233,27 @@ build_docker() {
     local docker_make_jobs="${DOCKER_MAKE_JOBS:-${JOBS:-4}}"
     log "Docker make parallelism: ${docker_make_jobs} (DOCKER_MAKE_JOBS or JOBS to override)"
 
+    local host_artifact_dir="$OUTPUT_DIR/$target_platform"
+    mkdir -p "$host_artifact_dir"
+
     docker run --rm \
         --platform "$docker_platform" \
-        -v "$PROJECT_DIR:/workspace" \
-        -w /workspace \
+        -v "$PROJECT_DIR:/src:ro" \
+        -v "$host_artifact_dir:/artifact" \
         -e VCPKG_PIN="${VCPKG_PIN}" \
         -e DOCKER_MAKE_JOBS="${docker_make_jobs}" \
+        -e EXTENSION_NAME="${EXTENSION_NAME}" \
         "$docker_image" \
         bash -c "
             set -e
+
             echo \"=== Installing libpq/openssl build prerequisites ===\"
             # bison + flex are required by the project's overlay libpq port
             # (vcpkg_ports/libpq); ninja-build / perl-IPC-Cmd / perl-core are
-            # required by openssl + the libpq build itself.
+            # required by openssl + the libpq build itself; rsync is used
+            # below to copy /src -> /build.
             yum install -y -q ninja-build perl-IPC-Cmd perl-core bison flex \
-                zip unzip tar pkgconfig curl > /dev/null
+                zip unzip tar pkgconfig curl rsync > /dev/null
 
             echo \"=== Verifying toolchain ===\"
             cmake --version | head -1
@@ -263,23 +269,29 @@ build_docker() {
             git -C /opt/vcpkg checkout -q FETCH_HEAD
             /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics > /dev/null 2>&1
 
-            echo \"=== Cleaning build directory ===\"
-            rm -rf build/release
+            echo \"=== Copying source into container fs (avoids macOS bind-mount depfile bug) ===\"
+            mkdir -p /build
+            rsync -a --delete \
+                --exclude=build/ --exclude=dist/ --exclude=vcpkg/ --exclude=.git/ \
+                /src/ /build/
 
             echo \"=== Building ===\"
+            cd /build
             export VCPKG_TOOLCHAIN_PATH=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake
             export VCPKG_MAX_CONCURRENCY=\"\${VCPKG_MAX_CONCURRENCY:-4}\"
             export CMAKE_BUILD_PARALLEL_LEVEL=\"\${DOCKER_MAKE_JOBS}\"
             make GEN=ninja -j\"\${DOCKER_MAKE_JOBS}\"
 
-            echo \"=== Done ===\"
+            echo \"=== Exporting extension to host artifact dir ===\"
+            cp \"build/release/extension/\${EXTENSION_NAME}/\${EXTENSION_NAME}.duckdb_extension\" /artifact/
+            ls -la /artifact/
         " 2>&1 | build_filter
 
-    local ext="build/release/extension/$EXTENSION_NAME/$EXTENSION_NAME.duckdb_extension"
-    mkdir -p "$OUTPUT_DIR/$target_platform"
-    compress_extension "$ext" "$OUTPUT_DIR/$target_platform/$EXTENSION_NAME.duckdb_extension.gz"
-    cp "$OUTPUT_DIR/$target_platform/$EXTENSION_NAME.duckdb_extension.gz" \
-       "$OUTPUT_DIR/$target_platform/postgres.duckdb_extension.gz"
+    local ext="$host_artifact_dir/$EXTENSION_NAME.duckdb_extension"
+    compress_extension "$ext" "$host_artifact_dir/$EXTENSION_NAME.duckdb_extension.gz"
+    rm -f "$ext"
+    cp "$host_artifact_dir/$EXTENSION_NAME.duckdb_extension.gz" \
+       "$host_artifact_dir/postgres.duckdb_extension.gz"
 }
 
 # ---------------------------------------------------------------------------
