@@ -280,6 +280,7 @@ build_docker() {
             export VCPKG_TOOLCHAIN_PATH=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake
             export VCPKG_MAX_CONCURRENCY=\"\${VCPKG_MAX_CONCURRENCY:-4}\"
             export CMAKE_BUILD_PARALLEL_LEVEL=\"\${DOCKER_MAKE_JOBS}\"
+            export OVERRIDE_GIT_DESCRIBE=\"${DUCKDB_VERSION}\"
             make GEN=ninja -j\"\${DOCKER_MAKE_JOBS}\"
 
             echo \"=== Exporting extension to host artifact dir ===\"
